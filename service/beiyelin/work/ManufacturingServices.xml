@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a 
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="unissue" noun="Component">
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="componentProductId" required="true"/>
+            <parameter name="componentQuantity" type="BigDecimal" required="true">
+                <description>Unissues up to this quantity for each component</description></parameter>
+            <parameter name="unissueDate" type="Timestamp" default="ec.user.nowTimestamp"/>
+        </in-parameters>
+        <actions>
+            <entity-find entity-name="mantle.product.issuance.AssetIssuance" list="issuanceList">
+                <econdition field-name="workEffortId"/>
+                <econdition field-name="productId" from="componentProductId"/>
+                <order-by field-name="assetIssuanceId"/>
+            </entity-find>
+
+            <set field="quantityRemaining" from="componentQuantity"/>
+            <iterate list="issuanceList" entry="issuance">
+                <if condition="quantityRemaining == 0.0"><break/></if>
+
+                <!-- for re-reservation get orderId, orderItemSeqId from ShipmentItemSource for assembly Product on Shipment for assembly, if applicable -->
+                <!-- NOTE: this is the only way to re-reserve PtPickAssembly because issuances to WorkEffort are NOT associated
+                    with the order (and should not be, is not the final AssetIssuance that should be associated with the OrderItem) -->
+                <if condition="assemblySisList"><then>
+                    <set field="curSisQtyRemaining" from="(issuance.quantity ?: 0.0) &gt; quantityRemaining ? quantityRemaining : issuance.quantity"/>
+                    <iterate list="assemblySisList" entry="assemblySis">
+                        <if condition="curSisQtyRemaining == 0.0"><break/></if>
+
+                        <set field="quantityToReduce" from="(assemblySis.quantity ?: 0.0) &gt; quantityRemaining ? quantityRemaining : assemblySis.quantity"/>
+                        <set field="curSisQtyRemaining" from="curSisQtyRemaining &gt; quantityToReduce ? (curSisQtyRemaining - quantityToReduce) : 0.0"/>
+                        <set field="quantityRemaining" from="quantityRemaining &gt; quantityToReduce ? (quantityRemaining - quantityToReduce) : 0.0"/>
+
+                        <service-call name="beiyelin.product.AssetServices.cancel#AssetIssuance"
+                                in-map="[assetIssuanceId:issuance.assetIssuanceId, cancelDate:unissueDate, quantityToCancel:quantityToReduce,
+                                    orderId:assemblySis.orderId, orderItemSeqId:assemblySis.orderItemSeqId]"/>
+                    </iterate>
+                </then><else>
+                    <set field="quantityToReduce" from="(issuance.quantity ?: 0.0) &gt; quantityRemaining ? quantityRemaining : issuance.quantity"/>
+                    <set field="quantityRemaining" from="quantityRemaining &gt; quantityToReduce ? (quantityRemaining - quantityToReduce) : 0.0"/>
+
+                    <service-call name="beiyelin.product.AssetServices.cancel#AssetIssuance"
+                            in-map="[assetIssuanceId:issuance.assetIssuanceId, cancelDate:unissueDate, quantityToCancel:quantityToReduce]"/>
+                </else></if>
+            </iterate>
+        </actions>
+    </service>
+
+</services>

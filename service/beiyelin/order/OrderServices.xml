@@ -1,0 +1,336 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a 
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- OrderProductQuantity aka "Cart" Services -->
+    <service verb="add" noun="OrderProductQuantity" authenticate="anonymous-all">
+        <!-- TODO had transaction="cache" but causing issues with updating single Payment amount and sometimes part/header total when there are multiple promotions active (ie New Customer and BOGO) -->
+
+        <description>A service for an add-to-cart sort of operation, including:
+            1. create an Order if no orderId is passed in
+            2. determine the price to charge for the Product (and update based on quantity as needed)
+            3. find a OrderItem matching the productId, and if found update quantity
+            4. if no existing OrderItem is found create a new OrderItem
+        </description>
+        <in-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderPartSeqId"/>
+            <!-- OrderHeader settings -->
+            <parameter name="productStoreId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="salesChannelEnumId"/>
+            <!-- OrderPart settings -->
+            <parameter name="customerPartyId"/>
+            <parameter name="carrierPartyId"/><parameter name="shipmentMethodEnumId"/>
+
+            <parameter name="productId" required="true"/>
+            <parameter name="description"/>
+            <parameter name="quantity" type="BigDecimal"><description>Defaults to 1 if addToQuantity=true (default)</description></parameter>
+            <parameter name="addToQuantity" type="Boolean" default="true">
+                <description>If true add to existing quantity, if false set quantity on current item</description></parameter>
+            <parameter name="updateExisting" type="Boolean" default="true">
+                <description>If true update existing item by productId, if false always create a new item</description></parameter>
+            <parameter name="requireInventory" type="Boolean">
+                <description>If true make sure inventory is available, if false don't check. If null defer to ProductStore.requireInventory setting.</description></parameter>
+            <parameter name="itemTypeEnumId" default-value="ItemProduct"/>
+            <parameter name="unitAmount" type="BigDecimal"/>
+            <parameter name="standardCost" type="BigDecimal"/>
+            <parameter name="requiredByDate" type="Timestamp"/>
+            <parameter name="otherPartyProductId"/>
+            <!--        添加对样机的处理-->
+            <parameter name="orderTypeEnumId"/>
+            <parameter name="fromAssetId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderPartSeqId" required="true"/>
+            <parameter name="orderItemSeqId" required="true"/>
+        </out-parameters>
+        <actions>
+            <message type="info">
+                In OrderProductQuantity, orderId: ${orderId}, quantity: ${quantity}, addtoQuantity: ${addToQuantity}
+            </message>
+            <if condition="quantity == null &amp;&amp; (addToQuantity || !updateExisting)"><set field="quantity" from="1.0"/></if>
+            <!-- handle explicit zero quantity -->
+            <if condition="(quantity == null || quantity &lt;= 0) &amp;&amp; updateExisting">
+                <!-- do nothing if add -->
+                <if condition="addToQuantity || !orderId"><return type="warning" message="addToQuantity || !orderId"/></if>
+                <!-- in set mode remove the item -->
+                <entity-find entity-name="mantle.order.OrderItem" list="orderItemList">
+                    <econdition-object field="[orderId:orderId, orderPartSeqId:orderPartSeqId, productId:productId,
+                        productConfigSavedId:null, forAssetId:null, selectedAmount:null]"/>
+                </entity-find>
+                <if condition="orderItemList">
+                    <service-call name="mantle.order.OrderServices.delete#OrderItem"
+                                  in-map="[orderId:orderId, orderItemSeqId:orderItemList[0].orderItemSeqId]"/>
+                </if>
+                <return type="warning" message="(quantity == null || quantity &lt;= 0) &amp;&amp; updateExisting"/>
+            </if>
+
+            <!-- lookup orderPartSeqId if not passed in -->
+            <if condition="!orderPartSeqId &amp;&amp; orderId">
+                <entity-find entity-name="mantle.order.OrderPart" list="orderPartList">
+                    <econdition field-name="orderId"/>
+                    <select-field field-name="orderPartSeqId"/>
+                    <order-by field-name="orderPartSeqId"/>
+                </entity-find>
+                <set field="orderPartSeqId" from="orderPartList?.first?.orderPartSeqId"/>
+            </if>
+
+            <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"/>
+            <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart" for-update="true"/>
+
+            <set field="productStoreId" from="productStoreId ?: orderHeader?.productStoreId"/>
+            <entity-find-one entity-name="mantle.product.store.ProductStore" value-field="productStore"/>
+            <set field="vendorPartyId" from="orderPart?.vendorPartyId ?: productStore?.organizationPartyId"/>
+            <set field="currencyUomId" from="currencyUomId ?: productStore?.defaultCurrencyUomId"/>
+            <set field="salesChannelEnumId" from="salesChannelEnumId ?: productStore?.defaultSalesChannelEnumId"/>
+
+            <!-- if orderPart.customerPartyId always use it, otherwise default to customerPartyId parameter or current user's partyId -->
+            <set field="customerPartyId" from="(orderPart?.customerPartyId ?: customerPartyId) ?: ec.user.userAccount?.partyId"/>
+
+            <if condition="!orderId">
+                <if condition="customerPartyId">
+                    <entity-find entity-name="mantle.order.OrderHeaderAndPart" list="existingOrderList">
+                        <econdition field-name="statusId" value="OrderOpen"/>
+                        <econdition field-name="customerPartyId"/>
+                        <econdition field-name="vendorPartyId" ignore-if-empty="true"/>
+                        <econdition field-name="productStoreId" ignore-if-empty="true"/>
+                        <econdition field-name="orderTypeEnumId" ignore-if-empty="true"/>
+                        <select-field field-name="orderId"/><select-field field-name="orderPartSeqId"/>
+                        <order-by field-name="-entryDate"/><!-- get most recent open order -->
+                    </entity-find>
+                    <if condition="existingOrderList">
+                        <set field="orderId" from="existingOrderList[0].orderId"/>
+                        <set field="orderPartSeqId" from="existingOrderList[0].orderPartSeqId"/>
+
+                        <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
+                        <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart"/>
+                    </if>
+                </if>
+                <!-- no existing open (cart) order found? create one -->
+                <if condition="!orderId">
+                    <service-call name="mantle.order.OrderServices.create#Order" out-map="createOrderOut"
+                                  in-map="[currencyUomId:currencyUomId, productStoreId:productStoreId, salesChannelEnumId:salesChannelEnumId,
+                                vendorPartyId:vendorPartyId, customerPartyId:customerPartyId, carrierPartyId:carrierPartyId,
+                                shipmentMethodEnumId:shipmentMethodEnumId, orderTypeEnumId:orderTypeEnumId]"/>
+                    <set field="orderId" from="createOrderOut.orderId"/>
+                    <set field="orderPartSeqId" from="createOrderOut.orderPartSeqId"/>
+
+                    <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
+                    <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart"/>
+                </if>
+            </if>
+
+            <!-- calculate the price based on quantity, etc, -->
+            <if condition="unitAmount == null"><then>
+                <!-- use PriceServices.get#OrderProductPrice instead of calling to get price directly, for pricePurposeEnumId override for recurring orders and other future behavior:
+                <service-call name="mantle.product.PriceServices.get#ProductPrice" out-map="priceMap"
+                              in-map="[productId:productId, quantity:quantity, priceUomId:currencyUomId,
+                         productStoreId:productStoreId, customerPartyId:customerPartyId, vendorPartyId:vendorPartyId]"/>
+                -->
+                <service-call name="mantle.product.PriceServices.get#OrderProductPrice" out-map="priceMap"
+                              in-map="[productId:productId, quantity:quantity, orderId:orderId, orderPartSeqId:orderPartSeqId]"/>
+
+                <set field="unitAmount" from="priceMap.price"/>
+                <set field="unitListPrice" from="priceMap.listPrice"/>
+                <set field="isModifiedPrice" value="N"/>
+                <log message="OrderProductQuantity Calculated Order ${orderId}:${orderPartSeqId} Product ${productId} calculated unitAmount ${unitAmount} unitListPrice ${unitListPrice} productStoreId ${productStoreId} customerPartyId ${customerPartyId} vendorPartyId ${vendorPartyId}"/>
+            </then><else>
+                <log message="OrderProductQuantity Modified Order ${orderId}:${orderPartSeqId} Product ${productId} manual unitAmount ${unitAmount}"/>
+                <set field="isModifiedPrice" value="Y"/>
+            </else></if>
+
+            <!-- look up otherPartyProductId if not specified - first from ProductParty then ProductPrice -->
+            <if condition="!otherPartyProductId &amp;&amp; productId">
+                <entity-find-one entity-name="mantle.party.PartyRole" value-field="vendorOrgRole">
+                    <field-map field-name="partyId" from="orderPart.vendorPartyId"/>
+                    <field-map field-name="roleTypeId" value="OrgInternal"/>
+                </entity-find-one>
+                <if condition="vendorOrgRole != null &amp;&amp; orderPart.customerPartyId"><then>
+                    <entity-find entity-name="mantle.product.ProductParty" list="otherPartyItemIdList" cache="false">
+                        <date-filter/><econdition field-name="productId"/>
+                        <econdition field-name="partyId" from="orderPart.customerPartyId"/>
+                        <econdition field-name="roleTypeId" value="Customer"/>
+                        <econdition field-name="otherPartyItemId" operator="is-not-null"/>
+                    </entity-find>
+                    <if condition="otherPartyItemIdList"><then>
+                        <set field="otherPartyProductId" from="otherPartyItemIdList[0].otherPartyItemId"/>
+                    </then><else>
+                        <!-- NOTE: consider removing this, ProductParty a better place, but would not be backward compatible -->
+                        <entity-find entity-name="mantle.product.ProductPrice" list="otherPartyItemIdList" cache="false">
+                            <date-filter/><econdition field-name="productId"/>
+                            <econdition field-name="customerPartyId" from="orderPart.customerPartyId"/>
+                            <econdition field-name="otherPartyItemId" operator="is-not-null"/>
+                        </entity-find>
+                        <if condition="otherPartyItemIdList">
+                            <set field="otherPartyProductId" from="otherPartyItemIdList[0].otherPartyItemId"/></if>
+                    </else></if>
+                </then><else-if condition="vendorOrgRole == null &amp;&amp; orderPart.vendorPartyId">
+                    <entity-find entity-name="mantle.product.ProductParty" list="otherPartyItemIdList" cache="false">
+                        <date-filter/><econdition field-name="productId"/>
+                        <econdition field-name="partyId" from="orderPart.vendorPartyId"/>
+                        <econdition field-name="roleTypeId" value="Supplier"/>
+                        <econdition field-name="otherPartyItemId" operator="is-not-null"/>
+                    </entity-find>
+                    <if condition="otherPartyItemIdList"><then>
+                        <set field="otherPartyProductId" from="otherPartyItemIdList[0].otherPartyItemId"/>
+                    </then><else>
+                        <!-- NOTE: consider removing this, ProductParty a better place, but would not be backward compatible -->
+                        <entity-find entity-name="mantle.product.ProductPrice" list="otherPartyItemIdList" cache="false">
+                            <date-filter/><econdition field-name="productId"/>
+                            <econdition field-name="vendorPartyId" from="orderPart.vendorPartyId"/>
+                            <econdition field-name="otherPartyItemId" operator="is-not-null"/>
+                        </entity-find>
+                        <if condition="otherPartyItemIdList">
+                            <set field="otherPartyProductId" from="otherPartyItemIdList[0].otherPartyItemId"/></if>
+                    </else></if>
+                </else-if></if>
+            </if>
+
+            <!-- find an OrderItem for the productId and increment quantity if found, otherwise create OrderItem with quantity -->
+            <entity-find entity-name="mantle.order.OrderItem" list="orderItemList">
+                <econdition field-name="orderId"/><econdition field-name="orderPartSeqId"/>
+                <econdition field-name="productId"/>
+                <econdition field-name="itemTypeEnumId" ignore-if-empty="true" />
+                <econdition field-name="fromAssetId" ignore-if-empty="true"/>
+                <econdition field-name="selectedAmount" operator="is-null"/>
+                <!-- for future reference: <econdition field-name="productConfigSavedId" operator="is-null"/> -->
+                <order-by field-name="orderItemSeqId"/>
+            </entity-find>
+
+            <if condition="orderItemList &amp;&amp; updateExisting"><then>
+                <set field="orderItem" from="orderItemList.first"/>
+                <set field="orderItemSeqId" from="orderItem.orderItemSeqId"/>
+                <set field="orderPartSeqId" from="orderItem.orderPartSeqId" set-if-empty="false"/>
+                <set field="unitAmount" from="unitAmount != null ? unitAmount : orderItem.unitAmount"/>
+                <set field="standardCost" from="standardCost != null ? standardCost : orderItem.standardCost"/>
+                <set field="quantity" from="addToQuantity ? quantity + orderItem.quantity : quantity"/>
+                <!-- if requiredByDate on orderItem is less than that passed in, make sure to use it instead of the new later one -->
+                <if condition="orderItem.requiredByDate &amp;&amp; requiredByDate &amp;&amp; orderItem.requiredByDate &lt; requiredByDate">
+                    <set field="requiredByDate" from="orderItem.requiredByDate"/></if>
+                <service-call name="mantle.order.OrderServices.update#OrderItem" in-map="context"/>
+            </then><else>
+                <service-call name="mantle.order.OrderServices.create#OrderItem" in-map="context" out-map="createOrderItemOut"/>
+                <set field="orderItemSeqId" from="createOrderItemOut.orderItemSeqId"/>
+            </else></if>
+        </actions>
+    </service>
+
+
+    <service verb="merge" noun="OrderItems">
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="fromOrderId" required="true"/>
+        </in-parameters>
+        <actions>
+            <entity-find entity-name="mantle.order.OrderItem" list="orderItemList">
+                <econdition field-name="orderId" from="fromOrderId"/></entity-find>
+            <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
+                <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>
+            <set field="productItemTypes" from="productItemTypeEgms*.enumId"/>
+            <iterate list="orderItemList" entry="orderItem">
+                <if condition="!orderItem.productId || !productItemTypes.contains(orderItem.itemTypeEnumId)"><continue/></if>
+                <service-call name="beiyelin.order.OrderServices.add#OrderProductQuantity"
+                              in-map="[orderId:orderId, productId:orderItem.productId, quantity:orderItem.quantity]"/>
+            </iterate>
+        </actions>
+    </service>
+    <!-- ========== Order-Request Services ========== -->
+
+    <service verb="create" noun="PurchaseRequestOrder">
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="customerPartyId" required="true">
+                <description>The customer for the PO. Should be an Internal Org.</description></parameter>
+            <parameter name="paymentInstrumentEnumId" default-value="PiCompanyCheck"/>
+            <parameter name="paymentMethodId"/>
+            <parameter name="shipmentMethodEnumId" default-value="ShMthPickUp"/>
+            <parameter name="placeAndApproveOrders" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderPartSeqId" required="true"/>
+        </out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.request.Request" value-field="request"/>
+            <if condition="!request.facilityId">
+                <return error="true" message="Request ${requestId} has no Facility set."/>
+            </if>
+
+            <entity-find entity-name="mantle.facility.FacilityContactMech" list="postalList" cache="true">
+                <date-filter/><econdition field-name="facilityId" from="request.facilityId"/>
+                <econdition field-name="contactMechPurposeId" operator="in" value="PostalShippingDest,PostalGeneral"/>
+                <order-by field-name="-contactMechPurposeId,-fromDate"/><!-- prefer PostalShippingDest over PostalGeneral, get most recent -->
+            </entity-find>
+            <set field="shippingPostalContactMechId" from="postalList?.first?.contactMechId"/>
+
+            <entity-find entity-name="mantle.facility.FacilityContactMech" list="phoneList" cache="true">
+                <date-filter/><econdition field-name="facilityId" from="request.facilityId"/>
+                <econdition field-name="contactMechPurposeId" operator="in" value="PhoneShippingDest,PhonePrimary"/>
+                <order-by field-name="-contactMechPurposeId,-fromDate"/><!-- prefer PhoneShippingDest over PhonePrimary, get most recent -->
+            </entity-find>
+            <set field="shippingTelecomContactMechId" from="phoneList?.first?.contactMechId"/>
+
+            <entity-find entity-name="mantle.request.RequestItem" list="allRequestItemList">
+                <econdition field-name="requestId"/></entity-find>
+
+            <!-- split request by supplierPartyId, create one PO for each -->
+            <set field="requestItemListBySupplier" from="[:]"/>
+            <iterate list="allRequestItemList" entry="requestItem">
+                <if condition="!requestItem.supplierPartyId">
+                    <return error="true" message="No Supplier set on item ${requestItem.requestItemSeqId} for Request ${requestId}"/></if>
+                <script>addToListInMap(requestItem.supplierPartyId, requestItem, requestItemListBySupplier)</script>
+            </iterate>
+
+            <iterate list="requestItemListBySupplier" entry="requestItemList" key="supplierPartyId">
+                <service-call name="mantle.order.OrderServices.create#Order" out-map="orderOut"
+                              in-map="[vendorPartyId:supplierPartyId, customerPartyId:customerPartyId,
+                            currencyUomId:(request.currencyUomId ?: 'USD'), facilityId:request.facilityId]"/>
+                <set field="earliestRequiredByDate" from="null"/>
+                <iterate list="requestItemList" entry="requestItem">
+                    <service-call name="beiyelin.order.OrderServices.add#OrderProductQuantity"
+                                  in-map="[orderId:orderOut.orderId, orderPartSeqId:orderOut.orderPartSeqId,
+                                productId:requestItem.productId, quantity:requestItem.quantity,
+                                itemTypeEnumId:'ItemProduct', requiredByDate:requestItem.requiredByDate]" out-map="addOut"/>
+                    <service-call name="create#mantle.request.RequestItemOrder"
+                                  in-map="[requestId:requestItem.requestId, requestItemSeqId:requestItem.requestItemSeqId,
+                                orderId:orderOut.orderId, orderItemSeqId:addOut.orderItemSeqId, quantity:requestItem.quantity]"/>
+                    <if condition="!earliestRequiredByDate || (requestItem.requiredByDate &amp;&amp; requestItem.requiredByDate &lt; earliestRequiredByDate)">
+                        <set field="earliestRequiredByDate" from="requestItem.requiredByDate"/></if>
+                </iterate>
+                <if condition="earliestRequiredByDate">
+                    <service-call name="update#mantle.order.OrderPart" in-map="[orderId:orderOut.orderId,
+                            orderPartSeqId:orderOut.orderPartSeqId, shipBeforeDate:earliestRequiredByDate]"/>
+                </if>
+                <service-call name="mantle.order.OrderServices.set#OrderBillingShippingInfo"
+                              in-map="[orderId:orderOut.orderId, orderPartSeqId:orderOut.orderPartSeqId,
+                            paymentInstrumentEnumId:paymentInstrumentEnumId, paymentMethodId:paymentMethodId,
+                            shippingPostalContactMechId:shippingPostalContactMechId,
+                            shippingTelecomContactMechId:shippingTelecomContactMechId,
+                            shipmentMethodEnumId:shipmentMethodEnumId]"/>
+                <if condition="placeAndApproveOrders">
+                    <service-call name="mantle.order.OrderServices.place#Order"
+                                  in-map="[orderId:orderOut.orderId, orderPartSeqId:orderOut.orderPartSeqId]"/>
+                    <service-call name="mantle.order.OrderServices.approve#Order"
+                                  in-map="[orderId:orderOut.orderId, orderPartSeqId:orderOut.orderPartSeqId]"/>
+                </if>
+            </iterate>
+
+            <!-- Order created for Purchase Request, set Request status to In Progress -->
+            <service-call name="update#mantle.request.Request" in-map="[requestId:requestId, statusId:'ReqInProgress']"/>
+        </actions>
+    </service>
+
+</services>

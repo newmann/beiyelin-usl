@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+   <!-- ========== Enumeration Services ========== -->
+    <service verb="find" noun="EnumerationByGroup" allow-remote="true">
+        <in-parameters>
+            <parameter name="enumGroupEnumId" required="true"/>
+            <parameter name="orderByField" default-value="sequenceNum"/>
+        </in-parameters>
+        <out-parameters><parameter name="enumerationList" type="List"/></out-parameters>
+        <actions>
+            <entity-find entity-name="moqui.basic.EnumAndGroup" list="enumerationList" cache="true">
+                <econdition field-name="enumGroupEnumId"/>
+                <order-by field-name="${orderByField}"/>
+            </entity-find>
+        </actions>
+    </service>
+
+    <service verb="get" noun="ItemTypeByOrderType" allow-remote="true">
+        <in-parameters>
+            <parameter name="orderTypeEnumId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="itemTypeEnumId" type="id"/></out-parameters>
+        <actions>
+            <service-call name="beiyelin.BasicServices.find#EnumerationByGroup" in-map="[enumGroupEnumId: 'EngTestMachineOrderType']" out-map="context"/>
+            <set field="itemTypeEnumId" from="enumerationList &amp;&amp; (orderTypeEnumId in enumerationList*.enumId)? 'ItemTestMachine' :'ItemProduct'"/>
+
+        </actions>
+    </service>
+
+</services>
