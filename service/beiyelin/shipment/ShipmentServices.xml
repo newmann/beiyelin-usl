@@ -409,9 +409,49 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="shipmentItemDetailList" entry="sid">
                 <set field="quantityRemaining" from="sid.quantity - (sid.quantityAcceptedTotal ?: 0) - (sid.quantityRejectedTotal ?: 0)"/>
 
-                <service-call name="beiyelin.shipment.ShipmentServices.receive#ShipmentProduct"
-                              in-map="[shipmentId:shipmentId, productId:sid.productId, statusId:statusId,
+                <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentItemSourceList">
+                    <econdition field-name="shipmentId" from="shipmentId"/>
+                    <econdition field-name="productId" from="sid.productId"/>
+                    <econdition field-name="statusId" operator="not-equals" value="SisReceived"/>
+                </entity-find>
+<!--                <message type="warning">shipmentItemSourceList: ${shipmentItemSourceList}</message>-->
+
+                <iterate list="shipmentItemSourceList" entry="shipmentItemSource">
+                    <if condition="shipmentItemSource.orderId &amp;&amp; shipmentItemSource.orderItemSeqId">
+                        <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader">
+                            <field-map field-name="orderId" from="shipmentItemSource.orderId"/>
+                        </entity-find-one>
+                        <if condition="orderHeader.orderTypeEnumId == 'OtTestMachineTakeBack'">
+                            <!--针对样机回收，需要特别处理-->
+                            <entity-find entity-name="mantle.order.OrderItemFromIssuance" list="orderItemFromIssuanceList">
+                                <econdition field-name="orderId" from="shipmentItemSource.orderId"/>
+                                <econdition field-name="orderItemSeqId" from="shipmentItemSource.orderItemSeqId"/>
+                            </entity-find>
+
+                            <iterate list="orderItemFromIssuanceList" entry="orderItemFromIssuance">
+                                <if condition="orderItemFromIssuance.quantityNotHandled == 0"><continue/></if>
+                                <set field="curQuantity" from="orderItemFromIssuance.quantityNotHandled &lt;= quantityRemaining? orderItemFromIssuance.quantityNotHandled : quantityRemaining"/>
+
+                                <service-call name="beiyelin.shipment.ShipmentServices.receive#ShipmentProduct"
+                                              in-map="[shipmentId:shipmentId, productId:sid.productId, statusId:statusId,
+                                                                quantityAccepted: curQuantity, facilityId:facilityId,
+                                                                orderId: orderItemFromIssuance.orderId,orderItemSeqId: orderItemFromIssuance.orderItemSeqId,
+                                                                assetId: orderItemFromIssuance.assetId,assetIssuanceId: orderItemFromIssuance.assetIssuanceId,
+                                                                fromOrderId: orderItemFromIssuance.fromOrderId,fromOrderItemSeqId: orderItemFromIssuance.fromOrderItemSeqId,
+                                                                ]"/>
+                                <set field="quantityRemaining" from="quantityRemaining - curQuantity"/>
+                                <if condition="quantityRemaining &lt;= 0.0"><break/></if>
+                            </iterate>
+                        </if>
+                    </if>
+
+                </iterate>
+                <if condition="quantityRemaining &gt; 0.0">
+                    <service-call name="beiyelin.shipment.ShipmentServices.receive#ShipmentProduct"
+                                  in-map="[shipmentId:shipmentId, productId:sid.productId, statusId:statusId,
                             quantityAccepted:quantityRemaining, facilityId:facilityId]"/>
+                    
+                </if>
             </iterate>
 
             <!-- consider doing this automatically when all quantities of all items are received -->
@@ -433,6 +473,16 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="lotNumber"/>
             <parameter name="expirationDate" type="Date"/>
             <parameter name="mfgPartyId"><description>Defaults to Shipment.fromPartyId (if lotNumber and no lotId)</description></parameter>
+<!--            针对样机回收等指定发货来源的收货业务，需要按发货的assetId重新写入asset-->
+<!--            收货订单-->
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+<!--            发货库存-->
+            <parameter name="assetId"/>
+            <parameter name="assetIssuanceId"/>
+<!--            发货订单-->
+            <parameter name="fromOrderId"/>
+            <parameter name="fromOrderItemSeqId"/>
         </in-parameters>
         <out-parameters><parameter name="assetIdList" type="List"><parameter name="assetId"/></parameter></out-parameters>
         <actions>
@@ -450,13 +500,21 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/>
                 <set field="mfgPartyId" from="shipment.fromPartyId"/>
             </if>
-            <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentItemSourceList" cache="false">
-                <econdition field-name="shipmentId"/><econdition field-name="productId"/></entity-find>
+
             <set field="assetIdList" from="[]"/>
             <set field="quantityAcceptedRemaining" from="quantityAccepted"/>
             <set field="quantityRejectedRemaining" from="quantityRejected"/>
-            <iterate list="shipmentItemSourceList" entry="shipmentItemSource">
 
+
+ 
+            
+            <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentItemSourceList" cache="false">
+                <econdition field-name="shipmentId"/>
+                <econdition field-name="productId"/>
+                <econdition field-name="orderId" ignore-if-empty="true"/>
+                <econdition field-name="orderItemSeqId" ignore-if-empty="true"/>
+            </entity-find>
+            <iterate list="shipmentItemSourceList" entry="shipmentItemSource">
 
                 <set field="updateQuantityNotHandled" from="shipmentItemSource.quantityNotHandled &gt; 0.0"/>
                 <!-- to handle transfer shipments with issuance before receipt and generally more flexible calc quantityNotHandled instead of getting from SIS -->
@@ -474,21 +532,73 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="quantityToReject" from="quantityNotHandled > quantityRejectedRemaining ? quantityRejectedRemaining : quantityNotHandled"/>
                 <set field="quantityRejectedRemaining" from="quantityRejectedRemaining > quantityNotHandled ? quantityRejectedRemaining - quantityNotHandled : 0.0"/>
                 <set field="quantityNotHandled" from="quantityNotHandled - quantityToReject"/>
-                <!--判断是否明细是否样机，如果为样机，数量必须为1，且需要录入序列号-->
+                <!--如果序列号不为空，则数量必须为1-->
+                <if condition="serialNumber &amp;&amp; (quantityToAccept != 1)">
+                    <return error="true" message="SerialNumber is ${serialNumber},but quantity is ${quantityToAccept}, should be 1."/>
+                </if>
                 <if condition="shipmentItemSource.orderId &amp;&amp; shipmentItemSource.orderItemSeqId">
                     <entity-find-one entity-name="mantle.order.OrderItem" value-field="orderItem">
                         <field-map field-name="orderId" from="shipmentItemSource.orderId"/>
                         <field-map field-name="orderItemSeqId" from="shipmentItemSource.orderItemSeqId"/>
                     </entity-find-one>
                     <if condition="orderItem?.itemTypeEnumId == 'ItemTestMachine'">
-                        <if condition="!serialNumber || (quantityToAccept != 1)">
-                            <return error="true" message="Order(${orderItem.orderId}) orderItem(${orderItem.orderItemSeqId} itemType is ${orderItem.itemTypeEnumId}, which must be set serialNumber and 1 quantity, but now serialNumber is ${serialNumber} quantity is ${quantityToAccept}"/>
-                        </if>
 <!--                    设置库存类型为样机-->
-                        <set field="assetTypeEnumId" value="AsTpTestMachine"/>
+                        <set field="assetTypeEnumId" value="AstTpTestMachine"/>
+                    </if>
+                </if>
+
+                <if condition="assetId &amp;&amp; assetIssuanceId">
+                    <!--                        对回收类业务进行特别处理-->
+                    <if condition="(shipmentItemSource.orderId != orderId) || (shipmentItemSource.orderItemSeqId != orderItemSeqId) ">
+                        <!--                        如果不是指定的订单，则跳过-->
+                        <continue/>
                     </if>
 
+                    <entity-find-one entity-name="mantle.product.asset.AssetBorrow" value-field="assetBorrow" for-update="true">
+                        <field-map field-name="assetId" from="assetId"/>
+                        <field-map field-name="assetIssuanceId" from="assetIssuanceId"/>
+                        <field-map field-name="productId" from="productId"/>
+                        <field-map field-name="orderId" from="fromOrderId"/>
+                        <field-map field-name="orderItemSeqId" from="fromOrderItemSeqId"/>
+                    </entity-find-one>
+<!--                    实退数-->
+                    <set field="assetBorrowReturnedQty" from="(assetBorrow.quantityReturned ?: 0.0) + quantityToAccept"/>
+                    <if condition="assetBorrow.quantity &lt; assetBorrowReturnedQty">
+                        <return error="true" message="assetBorrow.quantity:${assetBorrow.quantity}-assetBorrow.quantityReturned: ${assetBorrow.quantityReturned} less than quantityToAccept: ${quantityToAccept}"/>
+                    </if>
+<!--                    订单约定退回数-->
+                    <set field="assetBorrowPlacedQty" from="(assetBorrow.quantityPlaced ?: 0) - quantityToAccept"/>
+                    <if condition="assetBorrowPlacedQty &lt; 0">
+                        <return error="true" message="assetBorrow.quantityPlaced: ${assetBorrow.quantityPlaced} less then quantityToAccept: ${quantityToAccept}"/>
+                    </if>
+
+
+                    <if condition="assetBorrow.quantity &gt; assetBorrowReturnedQty">
+                        <then>
+                            <set field="assetBorrow.quantityReturned" from="assetBorrowReturnedQty"/>
+                            <set field="assetBorrow.quantityPlaced" from="assetBorrowPlacedQty"/>
+                            <entity-update value-field="assetBorrow"/>
+                        </then>
+                        <else>
+                            <!--    全部收回后，删除-->
+                            <entity-delete value-field="assetBorrow"/>
+                        </else>
+                    </if>
+<!--                    修改OrderItemFromIssuance的quantityNotHandled，不考虑quantityRejectedRemaining，是因为拒接收货就是没有收货，下次还要收回-->
+                    <entity-find-one entity-name="mantle.order.OrderItemFromIssuance" value-field="orderItemFromIssuance">
+                        <field-map field-name="orderId" from="orderId"/>
+                        <field-map field-name="orderItemSeqId" from="orderItemSeqId"/>
+                        <field-map field-name="assetId" from="assetId"/>
+                        <field-map field-name="assetIssuanceId" from="assetIssuanceId"/>
+                        <field-map field-name="productId" from="productId"/>
+                        <field-map field-name="fromOrderId" from="fromOrderId"/>
+                        <field-map field-name="fromOrderItemSeqId" from="fromOrderItemSeqId"/>
+                    </entity-find-one>
+                    <set field="orderItemFromIssuance.quantityNotHandled" from="orderItemFromIssuance.quantityNotHandled - quantityToAccept "/>
+                    <entity-update value-field="orderItemFromIssuance"/>
+
                 </if>
+
                 <service-call name="mantle.product.AssetServices.receive#Asset" out-map="receiveAssetOut"
                               in-map="context + [shipmentItemSourceId:shipmentItemSource.shipmentItemSourceId, shipmentPackageSeqId:null,
                             orderId:shipmentItemSource.orderId, orderItemSeqId:shipmentItemSource.orderItemSeqId,

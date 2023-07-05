@@ -50,7 +50,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="otherPartyProductId"/>
             <!--        添加对样机的处理-->
             <parameter name="orderTypeEnumId"/>
-            <parameter name="fromAssetId"/>
+<!--            <auto-parameters entity-name="mantle.product.asset.AssetBorrow" include="nonpk" />-->
         </in-parameters>
         <out-parameters>
             <parameter name="orderId" required="true"/>
@@ -58,9 +58,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="orderItemSeqId" required="true"/>
         </out-parameters>
         <actions>
-            <message type="info">
-                In OrderProductQuantity, orderId: ${orderId}, quantity: ${quantity}, addtoQuantity: ${addToQuantity}
-            </message>
+<!--            <message type="info">-->
+<!--                In OrderProductQuantity, orderId: ${orderId}, quantity: ${quantity}, addtoQuantity: ${addToQuantity}-->
+<!--            </message>-->
             <if condition="quantity == null &amp;&amp; (addToQuantity || !updateExisting)"><set field="quantity" from="1.0"/></if>
             <!-- handle explicit zero quantity -->
             <if condition="(quantity == null || quantity &lt;= 0) &amp;&amp; updateExisting">
@@ -204,12 +204,18 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="orderId"/><econdition field-name="orderPartSeqId"/>
                 <econdition field-name="productId"/>
                 <econdition field-name="itemTypeEnumId" ignore-if-empty="true" />
-                <econdition field-name="fromAssetId" ignore-if-empty="true"/>
+<!--                <econdition field-name="fromAssetId" ignore-if-empty="true"/>-->
                 <econdition field-name="selectedAmount" operator="is-null"/>
                 <!-- for future reference: <econdition field-name="productConfigSavedId" operator="is-null"/> -->
                 <order-by field-name="orderItemSeqId"/>
             </entity-find>
-
+<!--&lt;!&ndash;            判断AssetBorrow中数量是否足够&ndash;&gt;-->
+<!--            <if condition="assetBorrowId">-->
+<!--                <entity-find-one entity-name="mantle.product.asset.AssetBorrow" value-field="borrowAsset" for-update="true"/>-->
+<!--                <if condition="quantity &gt; borrowAsset.quantity-borrowAsset.quantityReturned">-->
+<!--                    <return type="danger" message="AssetBorrow quantity:[${borrowAsset.quantity}] - quantityReturned:[${borrowAsset.quantityReturned} less than needed quantity[${quantity}]]"/>-->
+<!--                </if>-->
+<!--            </if>-->
             <if condition="orderItemList &amp;&amp; updateExisting"><then>
                 <set field="orderItem" from="orderItemList.first"/>
                 <set field="orderItemSeqId" from="orderItem.orderItemSeqId"/>
@@ -225,6 +231,212 @@ along with this software (see the LICENSE.md file). If not, see
                 <service-call name="mantle.order.OrderServices.create#OrderItem" in-map="context" out-map="createOrderItemOut"/>
                 <set field="orderItemSeqId" from="createOrderItemOut.orderItemSeqId"/>
             </else></if>
+
+<!--            <if condition="assetBorrowId">-->
+<!--                <service-call name="update#mantle.product.asset.AssetBorrow" in-map="[assetBorrowId: assetBorrowId,-->
+<!--                        quantityReturned: borrowAsset.quantityReturned + quantity]"/>-->
+<!--                <service-call name="create#mantle.order.OrderItemFromIssuance" in-map="[orderId:orderId,orderItemSeqId:orderItemSeqId,-->
+<!--                        productId:productId,quantity:quantity,fromOrderId:fromOrderId,fromOrderItemSeqId:fromOrderItemSeqId]"/>-->
+<!--            </if>-->
+
+        </actions>
+    </service>
+
+    <service verb="add" noun="OrderProductQuantityFromIssuance" authenticate="anonymous-all">
+
+        <description>
+            根据发货数据添加订单明细
+        </description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderPartSeqId" required="true"/>
+            <parameter name="assetBorrowId" required="true"/>
+            <parameter name="selected" type="Boolean" default-value="true"/>
+            <parameter name="productStoreId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="productId" required="true"/>
+            <parameter name="description"/>
+            <parameter name="quantityConfirmed" type="BigDecimal" required="true"/>
+            <parameter name="itemTypeEnumId" default-value="ItemProduct"/>
+            <parameter name="unitAmount" type="BigDecimal"/>
+            <parameter name="standardCost" type="BigDecimal"/>
+            <parameter name="requiredByDate" type="Timestamp"/>
+
+<!--            <auto-parameters entity-name="mantle.product.asset.AssetBorrow" include="nonpk" />-->
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderItemSeqId" required="true"/>
+        </out-parameters>
+        <actions>
+
+            <if condition="quantityConfirmed == null || quantityConfirmed &lt;= 0" >
+                <return error="true" message="Quantity is ${quantityConfirmed}, cannot added to order(${orderId}:${orderPartSeqId})."/>
+            </if>
+
+            <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
+            <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart" />
+<!--先判断是否需要将本条记录加入，如果不加入，则删除原来的记录-->
+            <if condition="selected"><then>
+                <set field="productStoreId" from="productStoreId ?: orderHeader?.productStoreId"/>
+                <entity-find-one entity-name="mantle.product.store.ProductStore" value-field="productStore"/>
+                <set field="vendorPartyId" from="orderPart?.vendorPartyId ?: productStore?.organizationPartyId"/>
+                <set field="currencyUomId" from="currencyUomId ?: productStore?.defaultCurrencyUomId"/>
+
+                <!-- if orderPart.customerPartyId always use it, otherwise default to customerPartyId parameter or current user's partyId -->
+                <set field="customerPartyId" from="(orderPart?.customerPartyId ?: customerPartyId) ?: ec.user.userAccount?.partyId"/>
+
+                <!-- calculate the price based on quantity, etc, -->
+                <if condition="unitAmount == null"><then>
+                    <!-- use PriceServices.get#OrderProductPrice instead of calling to get price directly, for pricePurposeEnumId override for recurring orders and other future behavior:
+                    <service-call name="mantle.product.PriceServices.get#ProductPrice" out-map="priceMap"
+                                  in-map="[productId:productId, quantity:quantity, priceUomId:currencyUomId,
+                             productStoreId:productStoreId, customerPartyId:customerPartyId, vendorPartyId:vendorPartyId]"/>
+                    -->
+                    <service-call name="mantle.product.PriceServices.get#OrderProductPrice" out-map="priceMap"
+                                  in-map="[productId:productId, quantity:quantityConfirmed, orderId:orderId, orderPartSeqId:orderPartSeqId]"/>
+
+                    <set field="unitAmount" from="priceMap.price"/>
+                    <set field="unitListPrice" from="priceMap.listPrice"/>
+                    <set field="isModifiedPrice" value="N"/>
+                    <log message="OrderProductQuantity Calculated Order ${orderId}:${orderPartSeqId} Product ${productId} calculated unitAmount ${unitAmount} unitListPrice ${unitListPrice} productStoreId ${productStoreId} customerPartyId ${customerPartyId} vendorPartyId ${vendorPartyId}"/>
+                </then><else>
+                    <log message="OrderProductQuantity Modified Order ${orderId}:${orderPartSeqId} Product ${productId} manual unitAmount ${unitAmount}"/>
+                    <set field="isModifiedPrice" value="Y"/>
+                </else></if>
+
+                <!--            判断AssetBorrow中数量是否足够-->
+                <if condition="assetBorrowId">
+                    <entity-find-one entity-name="mantle.product.asset.AssetBorrow" value-field="borrowAsset" for-update="true"/>
+                    <if condition="quantityConfirmed &gt; borrowAsset.quantity - borrowAsset.quantityPlaced - borrowAsset.quantityReturned">
+                        <return type="danger" message="AssetBorrow quantity:[${borrowAsset.quantity}] -quantityPlaced:[${borrowAsset.quantityPlaced}]- quantityReturned:[${borrowAsset.quantityReturned} less than needed quantity[${quantityConfirmed}]]"/>
+                    </if>
+                </if>
+
+                <!-- find an OrderItem for the productId and increment quantity if found, otherwise create OrderItem with quantity -->
+                <entity-find entity-name="mantle.order.OrderItem" list="curOrderItem" limit="1" for-update="true">
+                    <econdition field-name="orderId"/><econdition field-name="orderPartSeqId"/>
+                    <econdition field-name="productId"/>
+                    <econdition field-name="itemTypeEnumId" ignore-if-empty="true" />
+                    <!--                <econdition field-name="fromAssetId" ignore-if-empty="true"/>-->
+                    <econdition field-name="selectedAmount" operator="is-null"/>
+                    <!-- for future reference: <econdition field-name="productConfigSavedId" operator="is-null"/> -->
+                    <order-by field-name="orderItemSeqId"/>
+                </entity-find>
+
+                <if condition="curOrderItem"><then>
+                    <!--                修改对应的OrderItemFromIssuance-->
+                    <entity-find-one entity-name="mantle.order.OrderItemFromIssuance" value-field="orderItemFromIssuance" for-update="true">
+                        <field-map field-name="orderId"/>
+                        <field-map field-name="orderItemSeqId"/>
+                        <field-map field-name="assetId" from="borrowAsset.assetId"/>
+                        <field-map field-name="assetIssuanceId" from="borrowAsset.assetIssuanceId"/>
+                        <field-map field-name="productId" />
+                    </entity-find-one>
+
+                    <if condition="orderItemFromIssuance"><then>
+<!--                        如果数量一致，则不用处理，直接返回-->
+                        <if condition="orderItemFromIssuance.quantity == quantityConfirmed"><return/></if>
+
+<!--                        有可能部分数量已经收货，这个时候，将计划收货数量改小，-->
+                        <set field="curQuantityDiff" from="orderItemFromIssuance.quantity-quantityConfirmed"/>
+                        <if condition="curQuantityDiff &gt; orderItemFromIssuance.quantityNotHandled">
+                            <return error="true" message="orderItemFromIssuance.quantity(${orderItemFromIssuance.quantity})-quantity(${quantityConfirmed}) > orderItemFromIssuance.quantityNotHandled(${orderItemFromIssuance.quantityNotHandled})"/>
+                        </if>
+                        <set field="orderItemFromIssuance.quantity" from="quantityConfirmed"/>
+                        <set field="orderItemFromIssuance.quantityNotHandled" from="orderItemFromIssuance.quantityNotHandled - curQuantityDiff"/>
+                        <entity-update value-field="orderItemFromIssuance"/>
+
+                        <service-call name="update#mantle.product.asset.AssetBorrow" in-map="[assetBorrowId: assetBorrowId,
+                            quantityReturned: borrowAsset.quantityPlaced - curQuantityDiff]"/>
+
+                    </then><else>
+                        <return error="true" message="Cannot find OrderItemFromIssuance"/>
+                    </else></if>
+                    <set field="curOrderItem.unitAmount" from="unitAmount ?: curOrderItem.unitAmount"/>
+                    <set field="curOrderItem.standardCost" from="standardCost ?: curOrderItem.standardCost"/>
+                    <set field="curOrderItem.quantity" from="quantityConfirmed"/>
+                    <set field="curOrderItem.requiredByDate" from="requiredByDate ?: curOrderItem.requiredByDate"/>
+
+                    <entity-update value-field="curOrderItem"/>
+                    <set field="orderItemSeqId" from="curOrderItem.orderItemSeqId"/>
+
+                </then><else>
+
+                    <service-call name="mantle.order.OrderServices.create#OrderItem" in-map="context" out-map="createOrderItemOut"/>
+                    <set field="orderItemSeqId" from="createOrderItemOut.orderItemSeqId"/>
+
+                    <service-call name="update#mantle.product.asset.AssetBorrow" in-map="[assetBorrowId: assetBorrowId,
+                            quantityReturned: borrowAsset.quantityPlaced + quantityConfirmed]"/>
+                    <service-call name="create#mantle.order.OrderItemFromIssuance" in-map="[orderId:orderId,orderItemSeqId:orderItemSeqId,
+                            assetId: borrowAsset.assetId,
+                            assetIssuanceId: borrowAsset.assetIssuanceId,
+                            productId:productId,
+                            quantity:quantityConfirmed,
+                            quantityNotHandled:quantityConfirmed,
+                            fromOrderId:borrowAsset.orderId,fromOrderItemSeqId:borrowAsset.orderItemSeqId]"/>
+                </else></if>
+        </then><else>
+
+                <!-- find an OrderItem for the productId and increment quantity if found, otherwise create OrderItem with quantity -->
+                <entity-find entity-name="mantle.order.OrderItem" list="curOrderItemList" limit="1" use-clone="true" >
+                    <econdition field-name="orderId"/><econdition field-name="orderPartSeqId"/>
+                    <econdition field-name="productId"/>
+                    <econdition field-name="itemTypeEnumId" ignore-if-empty="true" />
+                    <!--                <econdition field-name="fromAssetId" ignore-if-empty="true"/>-->
+                    <econdition field-name="selectedAmount" operator="is-null"/>
+                    <!-- for future reference: <econdition field-name="productConfigSavedId" operator="is-null"/> -->
+                    <order-by field-name="orderItemSeqId"/>
+                </entity-find>
+
+                <if condition="curOrderItemList">
+                    <set field="curOrderItem" from="curOrderItemList.first"/>
+                    <entity-find-one entity-name="mantle.product.asset.AssetBorrow" value-field="borrowAsset" for-update="true"/>
+                    <!--                修改对应的OrderItemFromIssuance-->
+                    <entity-find-one entity-name="mantle.order.OrderItemFromIssuance" value-field="orderItemFromIssuance" for-update="true">
+                        <field-map field-name="orderId" from="curOrderItem.orderId"/>
+                        <field-map field-name="orderItemSeqId" from="curOrderItem.orderItemSeqId"/>
+                        <field-map field-name="assetId" from="borrowAsset.assetId"/>
+                        <field-map field-name="assetIssuanceId" from="borrowAsset.assetIssuanceId"/>
+                        <field-map field-name="productId" from="curOrderItem.productId"/>
+                    </entity-find-one>
+
+                    <if condition="orderItemFromIssuance">
+
+<!--                        process OrderItem quantity-->
+                        <set field="curOrderItemQuantity " from="curOrderItem.quantity - orderItemFromIssuance.quantity" />
+                        <service-call name="mantle.order.OrderServices.update#OrderItem" in-map="
+                                    [orderId:curOrderItem.orderId,
+                                    orderItemSeqId:curOrderItem.orderItemSeqId,
+                                    productId:curOrderItem.productId,
+                                    quantity:curOrderItemQuantity]
+                                    " />
+
+
+
+<!--                        decrease AsssetBorrow quantityPlaceded-->
+                        <set field="borrowAsset.quantityPlaced" from="borrowAsset.quantityPlaced - orderItemFromIssuance.quantity"/>
+                        <!--                        添加个错误判断，一般不会出现-->
+                        <if condition="borrowAsset.quantityPlaced &lt; 0 ">
+                            <return error="true" message="AssetBorrow quantityPlaced &lt; 0"/>
+                        </if>
+                        <entity-update value-field="borrowAsset"/>
+<!--                        delete OrderItemFromIssuance-->
+                        <entity-delete value-field="orderItemFromIssuance"/>
+
+                        <if condition="curOrderItemQuantity == 0">
+                            <service-call name="delete#mantle.order.OrderItem" in-map="
+                                    [orderId:curOrderItem.orderId,
+                                    orderItemSeqId:curOrderItem.orderItemSeqId]
+                                    "/>
+                        </if>
+                    </if>
+                </if>
+
+        </else></if>
+
+
+
+
         </actions>
     </service>
 
@@ -243,7 +455,9 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="orderItemList" entry="orderItem">
                 <if condition="!orderItem.productId || !productItemTypes.contains(orderItem.itemTypeEnumId)"><continue/></if>
                 <service-call name="beiyelin.order.OrderServices.add#OrderProductQuantity"
-                              in-map="[orderId:orderId, productId:orderItem.productId, quantity:orderItem.quantity]"/>
+                              in-map="[orderId:orderId, productId:orderItem.productId,
+                              quantity:orderItem.quantity,
+                              itemTypeEnumId: orderItem.itemTypeEnumId]"/>
             </iterate>
         </actions>
     </service>

@@ -104,7 +104,9 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="resStatusList" from="['OrderPlaced', 'OrderProcessing', 'OrderApproved', 'OrderSent', 'OrderHold']"/>
                 </else></if>
                 <if condition="!(orderHeader.statusId in resStatusList) || !(orderPart.statusId in resStatusList)">
-                    <return message="OrderHeader stauts is ${orderHeader.statusId} and OrderPart status is ${orderPart.statusId},reservationAutoEnumId is ${reservationAutoEnumId},not reserve "/></if>
+                    <return/>
+                </if>
+<!--                    <return message="OrderHeader stauts is ${orderHeader.statusId} and OrderPart status is ${orderPart.statusId},reservationAutoEnumId is ${reservationAutoEnumId},not reserve "/></if>-->
             </if>
 
             <!-- reserve assets, or update reservations as needed -->
@@ -135,6 +137,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="componentQuantity" type="BigDecimal"/>
         </in-parameters>
         <actions>
+            <log level="warn" message="Now in reserve#AssetForOrderItem, in-map:${context}"/>
             <set field="nowTimestamp" from="ec.user.nowTimestamp"/>
 
             <!-- do a FOR UPDATE query on OrderItem as a semaphore (will also need on Asset records, done below) -->
@@ -510,6 +513,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- <log level="warn" message="Reserve order ${orderId}:${orderItemSeqId} asset ${assetId} lockedAssetList: ${lockedAssetList*.assetId} ${lockedAssetList*.availableToPromiseTotal}"/> -->
 
             <!-- do the reservations... -->
+            <log message="${lockedAssetList}" level="warn"/>
             <set field="baseMap" from="[orderId:orderId, orderItemSeqId:orderItemSeqId, productId:productId]"/>
             <iterate list="lockedAssetList" entry="asset">
                 <if condition="quantityRemaining &gt; 0.0">
@@ -555,64 +559,44 @@ along with this software (see the LICENSE.md file). If not, see
 
 
             <if condition="quantityRemaining &gt; 0.0">
-<!--                如果是样机，则每条资产只能对应一个数量-->
-                <if condition="orderItem.itemTypeEnumId == 'ItemTestMachine'" >
-                    <while condition="quantityRemaining &gt; 0.0">
-                        <!-- no asset... create a shell one to record the reservation and detail against -->
-                        <service-call name="beiyelin.product.AssetServices.create#ProductAssetAdHoc" out-map="assetOut"
-                                      in-map="[productId:productId, facilityId:inventoryFacilityId, ownerPartyId:organizationPartyId,
-                                assetTypeEnumId:'AsTpTestMachine',hasQuantity:'N', statusId:'AstAvailable',createdDate:nowTimestamp]"/>
-                        <set field="newResAssetId" from="assetOut.assetId"/>
 
-                        <service-call name="create#mantle.product.issuance.AssetReservation" out-map="resOut" in-map="baseMap +
-                            [assetId:newResAssetId, reservedDate:nowTimestamp, quantity:1,
-                                quantityNotAvailable:1, quantityNotIssued:1,
-                                priority:orderItem.priority, sequenceNum:0,
-                                reservationOrderEnumId:reservationOrderEnumId]"/>
-                        <service-call name="create#mantle.product.asset.AssetDetail" in-map="baseMap +
-                            [assetId:newResAssetId, effectiveDate:nowTimestamp,
-                                availableToPromiseDiff:-1, assetReservationId:resOut.assetReservationId]"/>
-                        <set field="quantityRemaining" from="quantityRemaining-1"/>
-
-                    </while>
-                    <else>
-                        <!-- look for qualifying Asset even if no available quantity and do 'not available' reservation on that instead of creating new ad-hoc -->
-                        <entity-find entity-name="mantle.product.asset.Asset" list="existingResAssetList" limit="1">
-                            <econdition field-name="productId"/>
-                            <econdition field-name="facilityId" from="inventoryFacilityId"/>
-                            <econdition field-name="ownerPartyId" from="organizationPartyId"/>
-                            <econdition field-name="assetPoolId" from="null"/>
-                            <econdition field-name="locationSeqId" from="null"/>
-                            <econdition field-name="containerId" from="null"/>
-                            <econdition field-name="lotId" from="null"/>
-                            <!-- may be populated even for negative availability placeholder records: <econdition field-name="acquireCost" from="null"/> -->
-                            <econdition field-name="statusId" value="AstAvailable"/>
-                            <econdition field-name="hasQuantity" value="Y"/>
-                            <econdition field-name="availableToPromiseTotal" operator="less-equals" from="0.0"/>
-                            <select-field field-name="assetId"/>
-                            <!-- NOTE: order by ATP ascending, expect to be negative so highest negative value first -->
-                            <order-by field-name="availableToPromiseTotal"/>
-                        </entity-find>
-                        <set field="newResAssetId" from="existingResAssetList ? existingResAssetList.get(0).assetId : null"/>
-                        <if condition="!newResAssetId">
-                            <!-- no asset... create a shell one to record the reservation and detail against -->
-                            <service-call name="beiyelin.product.AssetServices.create#ProductAssetAdHoc" out-map="assetOut"
-                                          in-map="[productId:productId, facilityId:inventoryFacilityId, ownerPartyId:organizationPartyId,
-                                createdDate:nowTimestamp]"/>
-                            <set field="newResAssetId" from="assetOut.assetId"/>
-                        </if>
-
-                        <service-call name="create#mantle.product.issuance.AssetReservation" out-map="resOut" in-map="baseMap +
-                        [assetId:newResAssetId, reservedDate:nowTimestamp, quantity:quantityRemaining,
-                            quantityNotAvailable:quantityRemaining, quantityNotIssued:quantityRemaining,
-                            priority:orderItem.priority, sequenceNum:0,
-                            reservationOrderEnumId:reservationOrderEnumId]"/>
-                        <service-call name="create#mantle.product.asset.AssetDetail" in-map="baseMap +
-                        [assetId:newResAssetId, effectiveDate:nowTimestamp,
-                            availableToPromiseDiff:-quantityRemaining, assetReservationId:resOut.assetReservationId]"/>
-
-                    </else>
+                <!-- look for qualifying Asset even if no available quantity and do 'not available' reservation on that instead of creating new ad-hoc -->
+                <entity-find entity-name="mantle.product.asset.Asset" list="existingResAssetList" limit="1">
+                    <econdition field-name="productId"/>
+                    <econdition field-name="facilityId" from="inventoryFacilityId"/>
+                    <econdition field-name="ownerPartyId" from="organizationPartyId"/>
+                    <econdition field-name="assetPoolId" from="null"/>
+                    <econdition field-name="locationSeqId" from="null"/>
+                    <econdition field-name="containerId" from="null"/>
+                    <econdition field-name="lotId" from="null"/>
+                    <!-- may be populated even for negative availability placeholder records: <econdition field-name="acquireCost" from="null"/> -->
+                    <econdition field-name="statusId" value="AstAvailable"/>
+                    <econdition field-name="assetTypeEnumId" value="requiredAssetTypeEnumIds"/><!--添加对库存状态的判断 -->
+                    <econdition field-name="hasQuantity" value="Y"/>
+                    <econdition field-name="availableToPromiseTotal" operator="less-equals" from="0.0"/>
+                    <select-field field-name="assetId"/>
+                    <!-- NOTE: order by ATP ascending, expect to be negative so highest negative value first -->
+                    <order-by field-name="availableToPromiseTotal"/>
+                </entity-find>
+                <log level="warn" message="existingResAssetList:${existingResAssetList}"/>
+                <set field="newResAssetId" from="existingResAssetList ? existingResAssetList.get(0).assetId : null"/>
+                <if condition="!newResAssetId">
+                    <!-- no asset... create a shell one to record the reservation and detail against -->
+                    <service-call name="beiyelin.product.AssetServices.create#ProductAssetAdHoc" out-map="assetOut"
+                                  in-map="[productId:productId, facilityId:inventoryFacilityId, ownerPartyId:organizationPartyId,
+                                    assetTypeEnumId:requiredAssetTypeEnumIds, createdDate:nowTimestamp]"/>
+                    <set field="newResAssetId" from="assetOut.assetId"/>
                 </if>
+
+                <service-call name="create#mantle.product.issuance.AssetReservation" out-map="resOut" in-map="baseMap +
+                [assetId:newResAssetId, reservedDate:nowTimestamp, quantity:quantityRemaining,
+                    quantityNotAvailable:quantityRemaining, quantityNotIssued:quantityRemaining,
+                    priority:orderItem.priority, sequenceNum:0,
+                    reservationOrderEnumId:reservationOrderEnumId]"/>
+                <service-call name="create#mantle.product.asset.AssetDetail" in-map="baseMap +
+                [assetId:newResAssetId, effectiveDate:nowTimestamp,
+                    availableToPromiseDiff:-quantityRemaining, assetReservationId:resOut.assetReservationId]"/>
+
             </if>
         </actions>
     </service>
@@ -1513,7 +1497,23 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.shipment.ShipmentItemSource" value-field="shipmentItemSource"/>
                 <if condition="!shipmentId"><set field="shipmentId" from="shipmentItemSource.shipmentId"/></if>
             </if>
+            <set field="updateOwnParty" value="Y"/>
 
+            <if condition="asset.assetTypeEnumId == 'AstTpTestMachine'">
+<!--                样机不需要更换ownParty-->
+                <set field="updateOwnParty" value="N"/>
+                <!--            获取borrowPartyId 和planReturnDate           -->
+                <!--                        按来源订单的类型判读-->
+
+
+                <if condition="assetReservation.orderId &amp;&amp; assetReservation.orderItemSeqId">
+                    <set field="orderHeader" from="assetReservation.orderHeader"/>
+                    <set field="orderItem" from="assetReservation.orderItem"/>
+                    <set field="orderPart" from="orderItem.part"/>
+                    <set field="planTakeBackDate" from="orderHeader.planTakeBackDate"/>
+                    <set field="borrowPartyId" from="orderPart.customerPartyId"/>
+                </if>
+            </if>
             <!-- see if there is another issuance we can add to -->
             <entity-find entity-name="mantle.product.issuance.AssetIssuance" list="existingIssuanceList">
                 <econdition field-name="shipmentId" ignore-if-empty="true"/>
@@ -1533,6 +1533,26 @@ along with this software (see the LICENSE.md file). If not, see
                               in-map="[assetIssuanceId:assetIssuanceId, quantity:(existingIssuance.quantity + quantity),
                             invoiceId:(existingIssuance.invoiceId ?: shipmentItemSource?.invoiceId),
                             invoiceItemSeqId:(existingIssuance.invoiceItemSeqId ?: shipmentItemSource?.invoiceItemSeqId)]"/>
+                <!--            针对样机类型的库存，需要记录到AssetBorrow-->
+                <if condition="asset.assetTypeEnumId == 'AstTpTestMachine'">
+                    <entity-find-one entity-name="mantle.product.asset.AssetBorrow" value-field="assetBorrow" for-update="true">
+                        <field-map field-name="assetId" from="assetReservation.assetId"/>
+                        <field-map field-name="assetIssuanceId" from="existingIssuance.assetIssuanceId"/>
+                        <field-map field-name="borrowPartyId" from="borrowPartyId"/>
+                        <field-map field-name="orderId" from="assetReservation.orderId" />
+                        <field-map field-name="orderItemSeqId" from="assetReservation.orderItemSeqId"/>
+                    </entity-find-one>
+                    <if condition="assetBorrow">
+                        <then>
+                            <set field="assetBorrow.quantity" from="assetBorrow.quantity + quantity"/>
+                            <entity-update value-field="assetBorrow"/>
+                        </then>
+                        <else>
+<!--                            说明没有找到对应的借用记录，存在问题-->
+                            <return type="danger" message="TestMachine AssetIssuance record not correspond to AssetBorrow record"/>
+                        </else>
+                    </if>
+                </if>
             </then><else>
                 <!-- create an issuance, get back assetIssuanceId -->
                 <service-call name="create#mantle.product.issuance.AssetIssuance" out-map="context"
@@ -1542,6 +1562,17 @@ along with this software (see the LICENSE.md file). If not, see
                             shipmentId:shipmentId, shipmentItemSourceId:shipmentItemSourceId,
                             workEffortId:workEffortId, productId:assetReservation.productId,
                             issuedDate:issuedDate, issuedByUserId:ec.user.userId, quantity:quantity]"/>
+                <if condition="asset.assetTypeEnumId == 'AstTpTestMachine'">
+                    <service-call name="create#mantle.product.asset.AssetBorrow" out-map="context"
+                                  in-map="[assetId:assetReservation.assetId,assetIssuanceId:assetIssuanceId,
+                                  borrowPartyId:borrowPartyId,productId:assetReservation.productId,
+                                  orderId:assetReservation.orderId, orderItemSeqId:assetReservation.orderItemSeqId,
+                                  quantity:quantity,
+                                  quantityPlaced:0.0,
+                                  quantityReturned:0.0,
+                                  planReturnDate:planReturnDate
+                                  ]"/>
+                </if>
             </else></if>
 
             <!-- create AssetDetail to decrement quantityOnHand -->
@@ -1559,39 +1590,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-update value-field="assetReservation"/>
             </else></if>
 
+
             <!-- if this is serialized inventory update status and set ownerPartyId to customer party -->
             <!-- NOTE: do after AssetDetail create and AssetReservation update so status change does not mess up ATP -->
             <if condition="asset.serialNumber &amp;&amp; quantity == 1.0 &amp;&amp; (asset.quantityOnHandTotal == 1.0 || asset.hasQuantity == 'N')">
-<!--                如果是样机，这需要特别处理，这种方式在内部资产领用也应该适用-->
-                <set field="updateOwnParty" value="Y"/>
-                <if condition="shipmentId">
-                    <then>
-<!--                        按装运单的类型判断-->
-
-                        <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/>
-                        <if condition="shipment.shipmentTypeEnumId == 'ShpTpTestMachineRequest'">
-                            <set field="updateOwnParty" value="N"/>
-                            <set field="borrowPartyId" from="shipment.toPartyId"/>
-                        </if>
-<!--                        <message type="warning">按装运单的类型判断,shipment.shipmentTypeEnumId:${shipment.shipmentTypeEnumId},updateOwnParty: ${updateOwnParty}</message>-->
-                    </then>
-                    <else>
-<!--                        按来源订单的类型判读-->
-                        <if condition="assetReservation.orderId &amp;&amp; assetReservation.orderItemSeqId">
-                            <set field="orderHeader" from="assetReservation.orderHeader"/>
-                            <if condition="orderHeader.orderTypeEnumId == 'OtTestMachineRequest'">
-                                <set field="orderItem" from="assetReservation.orderItem"/>
-                                <set field="orderPart" from="orderItem?.part"/>
-                                <if condition="orderPart?.customerPartyId">
-                                    <set field="updateOwnParty" value="N"/>
-                                    <set field="borrowPartyId" from="orderPart.customerPartyId"/>
-                                </if>
-
-                            </if>
-<!--                            <message type="warning">按来源订单的类型判读,orderHeader.orderTypeEnumId:${orderHeader.orderTypeEnumId},updateOwnParty: ${updateOwnParty}</message>-->
-                        </if>
-                    </else>
-                </if>
 <!--                <message type="warning">现在：updateOwnParty: ${updateOwnParty}</message>-->
                 <if condition="updateOwnParty == 'Y'">
                     <then>
@@ -1608,8 +1610,6 @@ along with this software (see the LICENSE.md file). If not, see
                     </then>
                     <else>
 <!--                        <message type="warning">do not update asset ownerPartyId，add AssetPartyAssignment：${borrowPartyId}</message>-->
-                        <service-call name="mantle.product.AssetServices.replace#AssetPartyAssignment"
-                                      in-map="[assetId:asset.assetId,roleTypeId:'TestParty',newPartyId:borrowPartyId]"/>
                         <service-call name="update#mantle.product.asset.Asset"
                                       in-map="[assetId:asset.assetId, statusId:'AstDelivered']"/>
 

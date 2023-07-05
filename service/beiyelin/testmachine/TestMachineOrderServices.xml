@@ -525,7 +525,7 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
 
 <!--            统一设置为样机库存-->
-            <set field="assetTypeEnumId" from="AsTpTestMachine" />
+            <set field="assetTypeEnumId" from="AstTpTestMachine" />
 
             <entity-find-one entity-name="beiyelin.testmachine.TestMachineOrderHeader" value-field="testMachineOrderHeader"
                              for-update="true"/>

@@ -1,0 +1,322 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a 
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="OrderDisplayInfo">
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="itemLimit" type="Integer"/>
+            <parameter name="templateSettingSuffix" default-value="TemplateOrderPrint"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderHeader" type="Map">
+                <auto-parameters entity-name="mantle.order.OrderHeader"/>
+            </parameter>
+            <parameter name="productStore" type="Map"/>
+            <parameter name="statusItem" type="Map">
+                <auto-parameters entity-name="moqui.basic.StatusItem"/>
+            </parameter>
+            <parameter name="editableStatusIds" type="Set">
+                <parameter name="statusId"/>
+            </parameter>
+            <parameter name="orderEditable" type="Boolean"/>
+            <parameter name="placeWarnings" type="List">
+                <parameter name="placeWarning"/>
+            </parameter>
+            <parameter name="childOrderList" type="List">
+                <parameter name="childOrder" type="Map"/>
+            </parameter>
+            <parameter name="recurCronDescription"/>
+
+            <parameter name="orderItemList" type="List">
+                <parameter name="orderItem" type="Map">
+                    <auto-parameters entity-name="mantle.order.OrderItem"/>
+                    <parameter name="orderItemFromIssuanceList" type="List">
+                        <parameter name="orderItemFromIssuance" type="Map">
+                            <auto-parameters entity-name="mantle.order.OrderItemFromIssuance"/>
+                        </parameter>
+                    </parameter>
+                </parameter>
+            </parameter>
+
+            <parameter name="orderItemNoParentCount" type="Integer"/>
+            <parameter name="allItemsAuditLogList" type="List">
+                <parameter name="orderItem" type="Map"/>
+            </parameter>
+            <parameter name="orderItemWithChildrenSet" type="Set">
+                <parameter name="orderItemSeqId"/>
+            </parameter>
+            <parameter name="productItemTypes" type="List">
+                <parameter name="itemTypeEnumId"/>
+            </parameter>
+
+            <parameter name="orderPromoCodeDetailList" type="List">
+                <parameter name="orderPromoCode" type="Map"/>
+            </parameter>
+            <parameter name="paymentList" type="List">
+                <parameter name="payment" type="Map">
+                    <auto-parameters entity-name="mantle.account.payment.Payment"/>
+                </parameter>
+            </parameter>
+
+            <parameter name="shipmentItemSourceList" type="List">
+                <parameter name="sis" type="Map">
+                    <auto-parameters entity-name="mantle.shipment.ShipmentItemSource"/>
+                </parameter>
+            </parameter>
+            <parameter name="shipmentIdSet" type="Set">
+                <parameter name="shipmentId"/>
+            </parameter>
+            <parameter name="quantityNotShippedByItem" type="Map">
+                <description>Key is orderItemSeqId, value is quantity not shipped for item.</description>
+            </parameter>
+            <parameter name="quantityNotShippedByPart" type="Map">
+                <description>Key is orderPartSeqId, value is quantity not shipped for all items in part.</description>
+            </parameter>
+
+            <parameter name="orderItemBillingList" type="List">
+                <parameter name="oib" type="Map">
+                    <auto-parameters entity-name="mantle.order.OrderItemBilling"/>
+                </parameter>
+            </parameter>
+            <parameter name="invoiceIdSet" type="Set">
+                <parameter name="invoiceId"/>
+            </parameter>
+            <parameter name="quantityNotBilledByItem" type="Map">
+                <description>Key is orderItemSeqId, value is quantity not billed for item.</description>
+            </parameter>
+            <parameter name="totalNotBilledByItem" type="Map">
+                <description>Key is orderItemSeqId, value is total (quantity * amount) not billed for item.
+                </description>
+            </parameter>
+            <parameter name="quantityNotBilledByPart" type="Map">
+                <description>Key is orderPartSeqId, value is quantity not billed for all items in part.</description>
+            </parameter>
+
+            <parameter name="returnItemList" type="List">
+                <parameter name="returnItem" type="Map">
+                    <auto-parameters entity-name="mantle.order.return.ReturnItem"/>
+                </parameter>
+            </parameter>
+
+            <parameter name="requestItemOrderList" type="List">
+                <parameter name="rio" type="Map">
+                    <auto-parameters entity-name="mantle.request.RequestItemOrder"/>
+                </parameter>
+            </parameter>
+            <parameter name="requestIdSet" type="Set">
+                <parameter name="requestId"/>
+            </parameter>
+
+            <parameter name="statusHistoryList" type="List">
+                <parameter name="auditLog" type="Map">
+                    <auto-parameters entity-name="moqui.entity.EntityAuditLog"/>
+                </parameter>
+            </parameter>
+            <parameter name="orderNoteList" type="List">
+                <parameter name="orderNote" type="Map">
+                    <auto-parameters entity-name="mantle.order.OrderNote"/>
+                </parameter>
+            </parameter>
+
+            <parameter name="systemMessageList" type="List">
+                <parameter name="systemMessage" type="Map"/>
+            </parameter>
+
+            <parameter name="orderPartList" type="List">
+                <parameter name="orderPart" type="Map">
+                    <auto-parameters entity-name="mantle.order.OrderPart"/>
+                </parameter>
+            </parameter>
+            <parameter name="firstPart" type="Map"/>
+            <parameter name="firstPartInfo" type="Map"/>
+            <parameter name="orderPartInfoList" type="List">
+                <parameter name="orderPartInfo" type="Map">
+                    <parameter name="orderPart" type="Map">
+                        <auto-parameters entity-name="mantle.order.OrderPart"/>
+                    </parameter>
+                    <parameter name="partEditable" type="Boolean"/>
+                    <parameter name="partOrderItemList" type="List">
+                        <parameter name="partOrderItem" type="Map">
+                            <auto-parameters entity-name="mantle.order.OrderItem"/>
+                        </parameter>
+                    </parameter>
+                    <parameter name="partNoParentOrderItemCount" type="Integer"/>
+                    <parameter name="partNoParentOrderItemList" type="List">
+                        <parameter name="partOrderItem" type="Map">
+                            <auto-parameters entity-name="mantle.order.OrderItem"/>
+                        </parameter>
+                    </parameter>
+                    <parameter name="hasShippableItems" type="Boolean"/>
+                    <parameter name="singleLot" type="Boolean"/>
+                    <parameter name="newerInventory" type="Boolean"/>
+                    <parameter name="shipmentMethodEnum" type="Map">
+                        <auto-parameters entity-name="moqui.basic.Enumeration"/>
+                    </parameter>
+                    <parameter name="carrierPartyDetail" type="Map"/>
+                    <parameter name="partPaymentList" type="List">
+                        <parameter name="partPayment" type="Map">
+                            <auto-parameters entity-name="mantle.account.payment.Payment"/>
+                        </parameter>
+                    </parameter>
+                    <parameter name="partPaymentInfoList" type="List">
+                        <parameter name="partPaymentInfo" type="Map">
+                            <parameter name="partPayment" type="Map">
+                                <auto-parameters entity-name="mantle.account.payment.Payment"/>
+                            </parameter>
+                            <parameter name="statusItem" type="Map">
+                                <auto-parameters entity-name="moqui.basic.StatusItem"/>
+                            </parameter>
+                            <parameter name="paymentMethod" type="Map">
+                                <auto-parameters entity-name="mantle.account.method.PaymentMethod"/>
+                            </parameter>
+                            <parameter name="creditCard" type="Map">
+                                <auto-parameters entity-name="mantle.account.method.CreditCard"/>
+                            </parameter>
+                            <parameter name="creditCardTypeEnum" type="Map">
+                                <auto-parameters entity-name="moqui.basic.Enumeration"/>
+                            </parameter>
+                            <parameter name="maskedCardNumber"/>
+                            <parameter name="postalAddress" type="Map">
+                                <auto-parameters entity-name="mantle.party.contact.PostalAddress"/>
+                            </parameter>
+                            <parameter name="postalAddressStateGeo" type="Map">
+                                <auto-parameters entity-name="moqui.basic.Geo"/>
+                            </parameter>
+                            <parameter name="telecomNumber" type="Map">
+                                <auto-parameters entity-name="mantle.party.contact.TelecomNumber"/>
+                            </parameter>
+                            <parameter name="paymentMethodTypeEnum" type="Map">
+                                <auto-parameters entity-name="moqui.basic.Enumeration"/>
+                            </parameter>
+                            <parameter name="paymentInstrumentEnum" type="Map">
+                                <auto-parameters entity-name="moqui.basic.Enumeration"/>
+                            </parameter>
+                            <parameter name="paymentTypeEnum" type="Map">
+                                <auto-parameters entity-name="moqui.basic.Enumeration"/>
+                            </parameter>
+                        </parameter>
+                    </parameter>
+                    <parameter name="paymentsTotal" type="BigDecimal"/>
+                    <parameter name="partTotalUnpaid" type="BigDecimal"/>
+                    <parameter name="postalAddress" type="Map">
+                        <auto-parameters entity-name="mantle.party.contact.PostalAddress"/>
+                    </parameter>
+                    <parameter name="postalAddressStateGeo" type="Map">
+                        <auto-parameters entity-name="moqui.basic.Geo"/>
+                    </parameter>
+                    <parameter name="telecomNumber" type="Map">
+                        <auto-parameters entity-name="mantle.party.contact.TelecomNumber"/>
+                    </parameter>
+                    <parameter name="facility" type="Map">
+                        <auto-parameters entity-name="mantle.facility.Facility"/>
+                    </parameter>
+                    <parameter name="facilityContactInfo" type="Map">
+                        <parameter name="postalContactMechId"/>
+                        <parameter name="postalContactMechPurposeId"/>
+                        <parameter name="postalAddress" type="Map">
+                            <auto-parameters entity-name="mantle.party.contact.PostalAddress"/>
+                        </parameter>
+                        <parameter name="postalAddressStateGeo" type="Map">
+                            <auto-parameters entity-name="moqui.basic.Geo"/>
+                        </parameter>
+                        <parameter name="postalAddressGeoPoint" type="Map">
+                            <auto-parameters entity-name="moqui.basic.GeoPoint"/>
+                        </parameter>
+                        <parameter name="telecomContactMechId"/>
+                        <parameter name="telecomContactMechPurposeId"/>
+                        <parameter name="telecomNumber" type="Map">
+                            <auto-parameters entity-name="mantle.party.contact.TelecomNumber"/>
+                        </parameter>
+                    </parameter>
+                    <parameter name="customerDetail" type="Map">
+                        <auto-parameters entity-name="mantle.party.PartyDetail"/>
+                    </parameter>
+                    <parameter name="customerEmail"/>
+                    <parameter name="vendorDetail" type="Map">
+                        <auto-parameters entity-name="mantle.party.PartyDetail"/>
+                    </parameter>
+                    <parameter name="isCustomerInternalOrg" type="Boolean"/>
+                    <parameter name="isVendorInternalOrg" type="Boolean"/>
+                    <parameter name="orderPartPartyList" type="List">
+                        <parameter name="orderPartParty">
+                            <auto-parameters entity-name="mantle.order.OrderPartPartyDetail"/>
+                        </parameter>
+                    </parameter>
+                    <parameter name="customerShipToDetail" type="Map">
+                        <auto-parameters entity-name="mantle.order.OrderPartPartyDetail"/>
+                    </parameter>
+                    <parameter name="customerBillToDetail" type="Map">
+                        <auto-parameters entity-name="mantle.order.OrderPartPartyDetail"/>
+                    </parameter>
+                    <parameter name="partShipmentItemSourceList" type="List">
+                        <parameter name="partSis" type="Map">
+                            <auto-parameters entity-name="mantle.shipment.ShipmentItemSource"/>
+                        </parameter>
+                    </parameter>
+                    <parameter name="partShipmentIdSet" type="Set">
+                        <parameter name="partShipmentId"/>
+                    </parameter>
+                </parameter>
+            </parameter>
+
+            <parameter name="templateLocation">
+                <description>Looked up from ProductStoreSetting and if no setting found for store or
+                    no store is associated with the Order then from PartySetting (for vendorPartyId).
+                </description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <service-call name="mantle.order.OrderInfoServices.get#OrderDisplayInfo" in-map="context" out-map="context"/>
+<!--            处理orderItem-->
+            <set field="newOrderItemList" from="[]"/>
+            <iterate list="orderItemList" entry="orderItem">
+                  <entity-find entity-name="mantle.order.OrderItemFromIssuance" list="orderItemFromIssuanceList">
+                      <econdition field-name="orderId" from="orderItem.orderId"/>
+                      <econdition field-name="orderItemSeqId" from="orderItem.orderItemSeqId"/>
+                      <order-by field-name="orderItemFromIssuanceId"/>
+                  </entity-find>
+                <set field="newOrderItem" from="orderItem.getMap()+['orderItemFromIssuanceList':orderItemFromIssuanceList]"/>
+                <script>
+                    newOrderItemList.add("[newOrderItem]")
+                </script>
+            </iterate>
+            <set field="orderItemList" from="newOrderItemList"/>
+
+<!--            处理orderPart下的orderItem-->
+
+            <iterate list="orderPartInfoList" entry="orderPartInfo">
+                <set field="newPartOrderItemList" from="[]"/>
+                <iterate list="orderPartInfo.partOrderItemList" entry="partOrderItem">
+                    <entity-find entity-name="mantle.order.OrderItemFromIssuance" list="partOrderItemFromIssuanceList">
+                        <econdition field-name="orderId" from="partOrderItem.orderId"/>
+                        <econdition field-name="orderItemSeqId" from="partOrderItem.orderItemSeqId"/>
+                        <order-by field-name="orderItemFromIssuanceId"/>
+                    </entity-find>
+<!--                    <message type="warning">partOrderItemFromIssuanceList: ${partOrderItemFromIssuanceList}</message>-->
+                    <set field="newPartOrderItem" from="partOrderItem.getMap()+['orderItemFromIssuanceList' : partOrderItemFromIssuanceList]"/>
+<!--                    <message type="warning">newPartOrderItem: ${newPartOrderItem}</message>-->
+                    <script>
+                        newPartOrderItemList.add(newPartOrderItem)
+                    </script>
+                </iterate>
+                <set field="orderPartInfo.partOrderItemList" from="newPartOrderItemList"/>
+            </iterate>
+        </actions>
+    </service>
+
+</services>
