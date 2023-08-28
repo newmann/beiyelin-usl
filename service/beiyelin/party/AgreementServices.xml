@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a 
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="update" noun="AgreementStatus">
+        <in-parameters>
+            <parameter name="agreementId" required="true"/>
+            <parameter name="statusId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="oldStatusId"/><parameter name="statusChanged" type="Boolean"/></out-parameters>
+        <actions>
+            <message>in update#AgreementStatus => agreementId:${agreementId},statusId:${statusId}</message>
+            <service-call name="update#mantle.party.agreement.Agreement" out-map="context" in-map="context"/>
+            <message>in update#AgreementStatus=> oldStatusId:${oldStatusId},statusChanged:${statusChanged}</message>
+        </actions>
+    </service>
+
+    <service verb="create" noun="BackToBackAgreement">
+        <in-parameters>
+            <auto-parameters entity-name="mantle.party.agreement.Agreement" include="nonpk"/>
+            <parameter name="agreementTypeEnumId" required="true"/>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="organizationRoleTypeId" required="true"/>
+            <parameter name="otherPartyId" required="true"/>
+            <parameter name="otherRoleTypeId" required="true"/>
+            <parameter name="toAgreementId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="agreementAssocId"/>
+        </out-parameters>
+        <actions>
+            <service-call name="create#mantle.party.agreement.Agreement" in-map="context" out-map="context"/>
+            <set field="agreementAssocTypeEnumId" value="AatBackToBack"/>
+            <service-call name="create#mantle.party.agreement.AgreementAssoc" in-map="context" out-map="context"/>
+        </actions>
+    </service>
+</services>

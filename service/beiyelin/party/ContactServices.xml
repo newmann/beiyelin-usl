@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a 
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<!--    由于父-子关系存在，不能直接用partyId-->
+    <service verb="store" noun="SubordinatePartyContactInfo">
+    <in-parameters>
+        <parameter name="subordinatePartyId" required="true"/>
+        <parameter name="orderId"><description>For address create or update if specified set OrderPart.postalContactMechId for Parts with no value, or on Part specified by orderPartSeqId</description></parameter>
+        <parameter name="orderPartSeqId"><description>For address create or update if specified along with orderId set OrderPart.postalContactMechId</description></parameter>
+        <parameter name="shipmentId"><description>For address create or update if specified set ShipmentRouteSegment origin and dest postal IDs that match previous contactMechId for update and for create based on aditional shipment* parameters</description></parameter>
+        <parameter name="shipmentRouteSegmentSeqId"><description>For address create if specified along with shipmentId set ShipmentRouteSegment origin or dest postal IDs</description></parameter>
+        <parameter name="shipmentSetOrigin" type="Boolean"><description>For address create if specified along with shipmentId set ShipmentRouteSegment.originPostalContactMechId</description></parameter>
+        <parameter name="shipmentSetDest" type="Boolean"><description>For address create if specified along with shipmentId set ShipmentRouteSegment.destPostalContactMechId</description></parameter>
+
+        <parameter name="replaceByPurpose" type="Boolean" default="false"/>
+
+        <parameter name="postalContactMechId"/>
+        <parameter name="postalContactMechPurposeId"/>
+        <auto-parameters entity-name="mantle.party.contact.PostalAddress" include="nonpk"/>
+        <auto-parameters entity-name="moqui.basic.GeoPoint" include="nonpk"/>
+
+        <parameter name="telecomContactMechId"/>
+        <parameter name="telecomContactMechPurposeId"/>
+        <auto-parameters entity-name="mantle.party.contact.TelecomNumber" include="nonpk"/>
+        <parameter name="countryCode"><text-digits/></parameter>
+        <parameter name="areaCode"><text-digits/></parameter>
+        <parameter name="contactNumber"><matches regexp="^\d\d[-\. \d]*\d\d$" message="Please enter a valid phone number"/></parameter>
+        <parameter name="telecomExtension"><text-digits/></parameter>
+        <parameter name="telecomAllowSolicitation"/>
+
+        <parameter name="emailContactMechId"/>
+        <parameter name="emailContactMechPurposeId"/>
+        <parameter name="emailAddress"><text-email/></parameter>
+        <parameter name="emailAllowSolicitation"/>
+
+        <parameter name="webContactMechId"/>
+        <parameter name="webContactMechPurposeId"/>
+        <parameter name="webAddress"><text-url/></parameter>
+        <parameter name="webAllowSolicitation"/>
+
+        <parameter name="otherContactMechId"/>
+        <parameter name="otherContactMechTypeEnumId"/>
+        <parameter name="otherContactMechPurposeId"/>
+        <parameter name="otherInfoString"/>
+    </in-parameters>
+    <out-parameters>
+        <parameter name="postalContactMechId"/>
+        <parameter name="telecomContactMechId"/>
+        <parameter name="emailContactMechId"/>
+        <parameter name="webContactMechId"/>
+        <parameter name="otherContactMechId"/>
+    </out-parameters>
+        <actions>
+            <service-call name="mantle.party.ContactServices.store#PartyContactInfo" in-map="context + [partyId: subordinatePartyId]" out-map="context"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="SubordinateContactMechOther">
+        <in-parameters>
+            <parameter name="infoString" required="true"/>
+            <parameter name="contactMechTypeEnumId" required="true"/>
+            <auto-parameters entity-name="mantle.party.contact.PartyContactMech" include="nonpk"/>
+
+            <parameter name="subordinatePartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="contactMechPurposeId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactMechId" required="true"/>
+        </out-parameters>
+        <actions>
+            <service-call name="mantle.party.ContactServices.create#ContactMechOther" in-map="context + [partyId:subordinatePartyId]" out-map="context"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="SubordinatePartyContactMech">
+        <in-parameters>
+            <parameter name="subordinatePartyId" required="true"/>
+            <parameter name="contactMechId" required="true"/>
+            <parameter name="contactMechPurposeId" required="true"/>
+            <auto-parameters entity-name="mantle.party.contact.PartyContactMech" include="nonpk"/>
+            <parameter name="oldContactMechPurposeId"/>
+            <parameter name="updateButton"><description>For convenience in forms, name the submit button for update 'updateButton'</description></parameter>
+            <parameter name="expireOld" type="Boolean" default="updateButton as boolean"/>
+        </in-parameters>
+        <actions>
+            <service-call name="mantle.party.ContactServices.store#PartyContactMech" in-map="context + [partyId:subordinatePartyId]" out-map="context"/>
+        </actions>
+    </service>
+    <service verb="delete" noun="SubordinatePartyContactMech">
+        <in-parameters>
+            <parameter name="subordinatePartyId" required="true"/>
+            <parameter name="contactMechId" required="true"/>
+            <parameter name="contactMechPurposeId"/>
+        </in-parameters>
+        <actions>
+            <service-call name="mantle.party.ContactServices.delete#PartyContactMech" in-map="context + [partyId:subordinatePartyId]" out-map="context"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="SubordinatePartyContactOther">
+        <in-parameters>
+            <parameter name="infoString" required="true"/>
+            <auto-parameters entity-name="mantle.party.contact.PartyContactMech" include="nonpk"/>
+
+            <parameter name="subordinatePartyId" required="true"/>
+            <parameter name="contactMechId" required="true"/>
+            <parameter name="contactMechPurposeId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactMechId" required="true"/>
+        </out-parameters>
+        <actions>
+            <service-call name="mantle.party.ContactServices.update#SubordinatePartyContactMech" in-map="context + [partyId:subordinatePartyId]" out-map="context"/>
+
+        </actions>
+    </service>
+
+    <service verb="undelete" noun="SubordinatePartyContactMech">
+        <in-parameters>
+            <parameter name="subordinatePartyId" required="true"/>
+            <parameter name="contactMechId" required="true"/>
+            <parameter name="contactMechPurposeId" required="true"/>
+            <parameter name="fromDate" required="true"/>
+        </in-parameters>
+        <actions>
+            <service-call name="mantle.party.ContactServices.undelete#SubordinatePartyContactMech" in-map="context + [partyId:subordinatePartyId]" out-map="context"/>
+        </actions>
+    </service>
+</services>

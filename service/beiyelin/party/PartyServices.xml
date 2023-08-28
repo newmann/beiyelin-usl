@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a 
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="create" noun="SubordinateOrganization" >
+        <in-parameters>
+            <!-- create#Organization fields -->
+            <auto-parameters entity-name="mantle.party.Party" include="nonpk"/>
+            <auto-parameters entity-name="mantle.party.Organization" include="nonpk"/>
+            <parameter name="organizationName" required="true"/>
+            <parameter name="roleTypeId" required="true" />
+
+            <!-- store#PartyContactInfo fields -->
+            <parameter name="postalContactMechPurposeId" default-value="PostalPrimary"/>
+            <auto-parameters entity-name="mantle.party.contact.PostalAddress" include="nonpk"/>
+
+            <parameter name="telecomContactMechPurposeId" default-value="PhonePrimary"/>
+            <auto-parameters entity-name="mantle.party.contact.TelecomNumber" include="nonpk"/>
+            <parameter name="countryCode"><text-digits/></parameter>
+            <parameter name="areaCode"><text-digits/></parameter>
+            <parameter name="contactNumber"><matches regexp="^\d\d[-\. \d]*\d\d$" message="Please enter a valid phone number"/></parameter>
+            <parameter name="telecomExtension"><text-digits/></parameter>
+            <parameter name="telecomAllowSolicitation"/>
+<!--            party relationship-->
+            <parameter name="toPartyId" required="true"/>
+            <parameter name="toRoleTypeId" required="true"/>
+            <parameter name="relationshipTypeEnumId" required="true"/>
+
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="fromPartyId"/>
+            <parameter name="fromRoleTypeId"/>
+            <parameter name="postalContactMechId"/>
+            <parameter name="telecomContactMechId"/>
+            <parameter name="toPartyId"/>
+            <parameter name="toRoleTypeId"/>
+            <parameter name="relationshipTypeEnumId"/>
+        </out-parameters>
+        <actions>
+            <service-call name="mantle.party.PartyServices.create#Organization" in-map="context" out-map="context"/>
+            <service-call name="mantle.party.ContactServices.store#PartyContactInfo" in-map="context" out-map="context"/>
+            <set field="fromPartyId" from="partyId"/>
+            <set field="fromRoleTypeId" from="roleTypeId"/>
+
+            <service-call name="create#mantle.party.PartyRelationship"
+                          in-map="[relationshipTypeEnumId:relationshipTypeEnumId, fromPartyId:fromPartyId, fromRoleTypeId:roleTypeId,
+                            toPartyId:toPartyId, toRoleTypeId:toRoleTypeId, fromDate:ec.user.nowTimestamp]" out-map="context"/>
+
+
+        </actions>
+    </service>
+    <service verb="create" noun="SubordinatePerson">
+        <in-parameters>
+            <!-- create#Person fields -->
+            <parameter name="pseudoId"/>
+            <auto-parameters entity-name="mantle.party.Person" include="nonpk"/>
+            <parameter name="firstName" required="true"/>
+            <parameter name="lastName" required="true"/>
+            <parameter name="roleTypeId" default-value="Employee"/>
+            <parameter name="partyClassificationId"/>
+
+            <!-- store#PartyContactInfo fields -->
+            <parameter name="postalContactMechPurposeId" default-value="PostalPrimary"/>
+            <auto-parameters entity-name="mantle.party.contact.PostalAddress" include="nonpk"/>
+
+            <parameter name="telecomContactMechPurposeId" default-value="PhonePrimary"/>
+            <auto-parameters entity-name="mantle.party.contact.TelecomNumber" include="nonpk"/>
+            <parameter name="countryCode"><text-digits/></parameter>
+            <parameter name="areaCode"><text-digits/></parameter>
+            <parameter name="contactNumber"><matches regexp="^\d\d[-\. \d]*\d\d$" message="Please enter a valid phone number"/></parameter>
+            <parameter name="telecomExtension"><text-digits/></parameter>
+            <parameter name="telecomAllowSolicitation"/>
+
+            <parameter name="emailContactMechPurposeId" default-value="EmailPrimary"/>
+            <parameter name="emailAddress"><text-email/></parameter>
+
+            <!-- create#PartyUserAccount fields -->
+            <parameter name="createUserAccount" type="Boolean"><description>If true create UserAccount, if false do not,
+                if not specified (null) create UserAccount if emailAddress and userGroupId are specified</description></parameter>
+            <parameter name="username" default="emailAddress"/>
+            <parameter name="newPassword"><description>If empty won't set a password, user will have to change or reset.</description></parameter>
+            <parameter name="newPasswordVerify"/>
+            <parameter name="disabled" default-value="N"/>
+            <parameter name="requirePasswordChange" default-value="N"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="locale"/>
+            <parameter name="timeZone"/>
+
+            <parameter name="userGroupId"/>
+            <parameter name="groupTypeEnumIdList" type="List">
+                <description>User group types allowed, set server-side to make sure userGroupId is of a type allowed</description>
+                <parameter name="groupTypeEnumId"/>
+            </parameter>
+
+            <!--            party relationship-->
+            <parameter name="toPartyId" required="true"/>
+            <parameter name="toRoleTypeId" required="true"/>
+            <parameter name="relationshipTypeEnumId" required="true"/>
+
+        </in-parameters>
+        <out-parameters>
+            <parameter name="emailContactMechId"/>
+            <parameter name="userId"/>
+            <parameter name="postalContactMechId"/>
+            <parameter name="telecomContactMechId"/>
+
+            <parameter name="partyRelationshipId"/>
+            <parameter name="fromPartyId"/>
+            <parameter name="fromRoleTypeId"/>
+            <parameter name="toPartyId"/>
+            <parameter name="toRoleTypeId"/>
+            <parameter name="relationshipTypeEnumId"/>
+
+        </out-parameters>
+        <actions>
+            <service-call name="mantle.party.PartyServices.create#Person" in-map="context" out-map="context"/>
+            <service-call name="mantle.party.ContactServices.store#PartyContactInfo" in-map="context" out-map="context"/>
+            <if condition="createUserAccount || (createUserAccount == null &amp;&amp; emailAddress &amp;&amp; userGroupId)">
+                <service-call name="mantle.party.PartyServices.create#PartyUserAccount" in-map="context" out-map="context"/>
+            </if>
+
+            <set field="fromPartyId" from="partyId"/>
+            <set field="fromRoleTypeId" from="roleTypeId"/>
+
+            <service-call name="create#mantle.party.PartyRelationship"
+                          in-map="[relationshipTypeEnumId:relationshipTypeEnumId, fromPartyId:fromPartyId, fromRoleTypeId:fromRoleTypeId,
+                        toPartyId:toPartyId, toRoleTypeId:toRoleTypeId, fromDate:ec.user.nowTimestamp]" out-map="context"/>
+
+        </actions>
+    </service>
+
+    <service verb="update" noun="SubordinatePartyDetail">
+        <in-parameters>
+            <auto-parameters entity-name="mantle.party.Party" include="nonpk"/>
+            <auto-parameters entity-name="mantle.party.Person" include="nonpk"/>
+            <auto-parameters entity-name="mantle.party.Organization" include="nonpk"/>
+            <parameter name="subordinatePartyId" required="true"/>
+        </in-parameters>
+        <actions>
+
+            <entity-find-one entity-name="mantle.party.Party" value-field="party" auto-field-map="[partyId:subordinatePartyId]"/>
+            <entity-set value-field="party" include="nonpk" set-if-empty="true"/>
+            <entity-update value-field="party"/>
+
+            <if condition="party.partyTypeEnumId == 'PtyPerson'">
+                <entity-find-one entity-name="mantle.party.Person" value-field="person" auto-field-map="[partyId:subordinatePartyId]"/>
+                <entity-set value-field="person" include="nonpk" set-if-empty="true"/>
+                <entity-update value-field="person"/>
+            </if>
+            <if condition="party.partyTypeEnumId == 'PtyOrganization'">
+                <entity-find-one entity-name="mantle.party.Organization" value-field="org" auto-field-map="[partyId:subordinatePartyId]"/>
+                <entity-set value-field="org" include="nonpk" set-if-empty="true"/>
+                <entity-update value-field="org"/>
+            </if>
+        </actions>
+    </service>
+
+    <service verb="create" noun="SubordinatePartyRole">
+        <in-parameters>
+            <parameter name="subordinatePartyId" required="true"/>
+            <parameter name="roleTypeId" required="true"/>
+        </in-parameters>
+        <actions>
+            <service-call name="create#mantle.party.PartyRole" in-map="[partyId:subordinatePartyId,roleTypeId:roleTypeId]"/>
+        </actions>
+    </service>
+    <service verb="delete" noun="SubordinatePartyRole">
+        <in-parameters>
+            <parameter name="subordinatePartyId" required="true"/>
+            <parameter name="roleTypeId" required="true"/>
+        </in-parameters>
+        <actions>
+            <service-call name="delete#mantle.party.PartyRole" in-map="[partyId:subordinatePartyId,roleTypeId:roleTypeId]"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="SubordinatePartyNote">
+        <in-parameters>
+            <auto-parameters entity-name="mantle.party.PartyNote" include="nonpk"/>
+            <parameter name="subordinatePartyId" required="true"/>
+            <parameter name="noteDate" type="Timestamp" default="ec.user.nowTimestamp"/>
+        </in-parameters>
+        <actions>
+            <service-call name="create#mantle.party.PartyNote" in-map="context + [partyId:subordinatePartyId]"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="SubordinatePartyNote">
+        <in-parameters>
+            <auto-parameters entity-name="mantle.party.PartyNote" include="nonpk"/>
+            <parameter name="subordinatePartyId" required="true"/>
+            <parameter name="noteDate"  type="Timestamp" required="true"/>
+        </in-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.party.PartyNote" value-field="note" auto-field-map="[partyId:subordinatePartyId,noteDate:noteDate]"/>
+            <entity-set value-field="note" include="nonpk" set-if-empty="true"/>
+            <entity-update value-field="note"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="SubordinatePartyContent">
+        <in-parameters>
+            <auto-parameters entity-name="mantle.party.PartyContent" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="subordinatePartyId" required="true"/>
+            <parameter name="contentFile" type="org.apache.commons.fileupload.FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="partyContentId"/></out-parameters>
+        <actions>
+            <service-call name="mantle.party.PartyServices.create#PartyContent" in-map="context+ [partyId: subordinatePartyId]" out-map="context"/>
+        </actions>
+    </service>
+    <service verb="update" noun="SubordinatePartyContent">
+        <in-parameters>
+            <parameter name="partyContentId" required="true"/>
+            <auto-parameters entity-name="mantle.party.PartyContent" include="nonpk">
+                <exclude field-name="contentLocation"/>
+                <exclude field-name="partyId"/>
+            </auto-parameters>
+            <parameter name="subordinatePartyId" required="true"/>
+            <parameter name="contentFile" type="org.apache.commons.fileupload.FileItem"/>
+        </in-parameters>
+        <actions>
+            <service-call name="mantle.party.PartyServices.update#PartyContent" in-map="context+ [partyId: subordinatePartyId]" out-map="context"/>
+        </actions>
+    </service>
+
+</services>
